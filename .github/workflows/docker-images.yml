@@ -59,7 +59,7 @@ jobs:
             NEXT_PUBLIC_BUCKET_URL=http://localhost:9000/sitepins-media
             NEXT_PUBLIC_BRAND_NAME=Sitepins
             NEXT_PUBLIC_BRAND_URL=https://sitepins.com
-            NEXT_PUBLIC_GIT_APP_NAME=sitepins-local
+            NEXT_PUBLIC_GIT_APP_NAME=sitepins-local-jsar
             NEXT_PUBLIC_BRAND_SLUG=sitepins
             NEXT_PUBLIC_BRAND_LOGO=/images/logo.svg
             NEXT_PUBLIC_BRAND_LOGO_DARK=/images/logo-white.svg
