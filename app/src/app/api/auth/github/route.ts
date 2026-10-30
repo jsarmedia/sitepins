@@ -60,38 +60,17 @@ async function handler(request: NextRequest) {
 
     const { searchParams } = new URL(request.url);
     const code = searchParams.get("code");
-    const installationId = searchParams.get("installation_id");
+    const requestedInstallationId = searchParams.get("installation_id");
 
     if (!code) {
       return NextResponse.json({ error: "Missing code" }, { status: 400 });
     }
-    if (!installationId || !/^\d+$/.test(installationId)) {
+    if (requestedInstallationId && !/^\\d+$/.test(requestedInstallationId)) {
       return NextResponse.json(
-        { error: "Missing or invalid installation_id" },
+        { error: "Invalid installation_id" },
         { status: 400 },
       );
     }
-
-    const octokit: Octokit = new Octokit({
-      authStrategy: createAppAuth,
-      version: GITHUB_API_VERSION,
-      auth: {
-        appId: process.env.GITHUB_APP_ID!,
-        privateKey: process.env.GITHUB_APP_PRIVATE_KEY!,
-        installationId,
-      },
-      request: {
-        headers: {
-          "X-GitHub-Api-Version": GITHUB_API_VERSION,
-        },
-      },
-      // log: {
-      //   warn: () => {},
-      //   info: () => {},
-      //   debug: () => {},
-      //   error: console.error,
-      // },
-    });
 
     const app = new App({
       oauth: {
@@ -108,10 +87,8 @@ async function handler(request: NextRequest) {
       code,
     });
 
-    // `installation_id` arrives in the query string, and installation ids are
-    // sequential integers. Without this check, passing another org's id would
-    // hand the caller an installation token with contents:write on that org's
-    // repositories. Only installations this user can actually see are allowed.
+    // An OAuth callback for an already-installed GitHub App may omit
+    // installation_id. Resolve it from installations visible to this user.
     const userOctokit = new Octokit({
       auth: token.authentication.token,
       request: { headers: { "X-GitHub-Api-Version": GITHUB_API_VERSION } },
@@ -122,19 +99,43 @@ async function handler(request: NextRequest) {
       { per_page: 100 },
     );
 
-    const canAccessInstallation = userInstallations.some(
-      (candidate: { id: number }) => String(candidate.id) === installationId,
+    // Never accept an installation belonging to another GitHub App, even if
+    // the user can access it. App IDs are numeric, so normalize both sides.
+    const matchingInstallations = userInstallations.filter(
+      (candidate) => String(candidate.app_id) === process.env.GITHUB_APP_ID,
     );
+    const selectedInstallation = requestedInstallationId
+      ? matchingInstallations.find(
+          (candidate) => String(candidate.id) === requestedInstallationId,
+        )
+      : matchingInstallations.length === 1
+        ? matchingInstallations[0]
+        : undefined;
 
-    if (!canAccessInstallation) {
-      logger.error("GitHub installation not accessible to caller", {
-        installationId,
-      });
+    if (!selectedInstallation) {
       return NextResponse.json(
-        { error: "You do not have access to that GitHub installation" },
-        { status: 403 },
+        {
+          error: matchingInstallations.length > 1 && !requestedInstallationId
+            ? "Multiple GitHub App installations found; installation_id is required"
+            : "No accessible installation found for this GitHub App",
+        },
+        { status: 400 },
       );
     }
+
+    const installationId = String(selectedInstallation.id);
+    const octokit: Octokit = new Octokit({
+      authStrategy: createAppAuth,
+      version: GITHUB_API_VERSION,
+      auth: {
+        appId: process.env.GITHUB_APP_ID!,
+        privateKey: process.env.GITHUB_APP_PRIVATE_KEY!,
+        installationId,
+      },
+      request: {
+        headers: { "X-GitHub-Api-Version": GITHUB_API_VERSION },
+      },
+    });
 
     const installation = (await octokit.auth({
       type: "installation",
